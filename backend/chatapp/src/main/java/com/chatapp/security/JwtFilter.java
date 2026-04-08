@@ -28,7 +28,8 @@ public class JwtFilter extends OncePerRequestFilter {
 
         String path = request.getServletPath();
 
-        if (path.startsWith("/auth") || path.startsWith("/ws")) {
+        // Skip filter for these paths — no token needed
+        if (path.startsWith("/auth") || path.startsWith("/ws") || path.startsWith("/test-chat")) {
             filterChain.doFilter(request, response);
             return;
         }

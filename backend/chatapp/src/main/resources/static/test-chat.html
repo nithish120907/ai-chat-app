@@ -8,31 +8,62 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .chat-box { background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 420px; overflow: hidden; }
-        .chat-header { background: #075e54; color: white; padding: 16px 20px; font-size: 16px; font-weight: bold; }
-        .messages { height: 320px; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+        .chat-box { background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 440px; overflow: hidden; }
+        .chat-header { background: #075e54; color: white; padding: 14px 20px; font-size: 16px; font-weight: bold; }
+        .chat-info { display: flex; gap: 8px; padding: 10px 12px; background: #f9f9f9; border-bottom: 1px solid #eee; }
+        .chat-info input { flex: 1; padding: 6px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; outline: none; }
+        .chat-info label { font-size: 11px; color: #888; display: block; margin-bottom: 2px; }
+        .mode-btns { display: flex; gap: 6px; padding: 8px 12px; background: #f0f0f0; }
+        .mode-btn { flex: 1; padding: 6px; border: 1px solid #ccc; border-radius: 8px; font-size: 12px; cursor: pointer; background: white; }
+        .mode-btn.active { background: #075e54; color: white; border-color: #075e54; }
+        .messages { height: 300px; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
         .msg { max-width: 75%; padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.4; }
         .msg.sent { background: #dcf8c6; align-self: flex-end; border-bottom-right-radius: 2px; }
         .msg.received { background: #ececec; align-self: flex-start; border-bottom-left-radius: 2px; }
-        .msg .name { font-weight: bold; font-size: 12px; color: #075e54; margin-bottom: 2px; }
-        .suggestions { padding: 8px 12px; background: #f9f9f9; border-top: 1px solid #eee; display: flex; gap: 6px; flex-wrap: wrap; min-height: 40px; }
+        .msg.bot { background: #e3f2fd; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .msg .name { font-weight: bold; font-size: 11px; color: #075e54; margin-bottom: 2px; }
+        .msg.bot .name { color: #1565c0; }
+        .suggestions { padding: 8px 12px; background: #f9f9f9; border-top: 1px solid #eee; display: flex; gap: 6px; flex-wrap: wrap; min-height: 36px; align-items: center; }
         .suggestion-btn { background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 16px; padding: 4px 12px; font-size: 12px; cursor: pointer; color: #2e7d32; }
         .suggestion-btn:hover { background: #c8e6c9; }
         .input-row { display: flex; padding: 10px 12px; gap: 8px; border-top: 1px solid #eee; }
-        input { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 20px; outline: none; font-size: 14px; }
+        input#message { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 20px; outline: none; font-size: 14px; }
         button.send-btn { background: #075e54; color: white; border: none; border-radius: 50%; width: 38px; height: 38px; font-size: 18px; cursor: pointer; }
         #status { text-align: center; font-size: 12px; padding: 4px; color: #888; }
+        .receiver-tag { font-size: 11px; text-align: center; color: #888; padding: 2px; }
     </style>
 </head>
 <body>
 <div class="chat-box">
     <div class="chat-header">💬 AI Chat App</div>
+
+    <!-- Name + Receiver inputs -->
+    <div class="chat-info">
+        <div>
+            <label>Your Name</label>
+            <input id="sender" placeholder="e.g. nithish" />
+        </div>
+        <div>
+            <label>Receiver</label>
+            <input id="receiver" placeholder="e.g. bot or nithish" />
+        </div>
+    </div>
+
+    <!-- Quick mode buttons -->
+    <div class="mode-btns">
+        <button class="mode-btn" onclick="setMode('bot')">🤖 Chat with Bot</button>
+        <button class="mode-btn" onclick="setMode('nithish')">👤 Chat with Person</button>
+    </div>
+
+    <div class="receiver-tag" id="receiver-tag">Receiver: —</div>
+
     <div id="messages" class="messages"></div>
+
     <div id="suggestions" class="suggestions">
         <span style="color:#bbb;font-size:12px">AI suggestions appear here...</span>
     </div>
+
     <div class="input-row">
-        <input id="sender" placeholder="Your name" style="max-width:90px" />
         <input id="message" placeholder="Type a message..."
                onkeydown="if(event.key==='Enter') sendMessage()" />
         <button class="send-btn" onclick="sendMessage()">➤</button>
@@ -55,11 +86,18 @@
             var currentUser = document.getElementById('sender').value;
 
             var div = document.createElement('div');
-            div.className = 'msg ' + (body.sender === currentUser ? 'sent' : 'received');
+            if (body.sender === '🤖 AI Bot') {
+                div.className = 'msg bot';
+            } else if (body.sender === currentUser) {
+                div.className = 'msg sent';
+            } else {
+                div.className = 'msg received';
+            }
             div.innerHTML = '<div class="name">' + body.sender + '</div>' + body.content;
             messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
 
+            // Show suggestions only for person-to-person chat
             if (body.suggestions && body.suggestions.length > 0) {
                 var suggestionsDiv = document.getElementById('suggestions');
                 suggestionsDiv.innerHTML = '';
@@ -80,14 +118,36 @@
         document.getElementById('status').style.color = 'red';
     });
 
+    function setMode(receiver) {
+        document.getElementById('receiver').value = receiver;
+        document.getElementById('receiver-tag').textContent =
+            receiver === 'bot' ? 'Receiver: 🤖 AI Bot' : 'Receiver: 👤 ' + receiver;
+
+        // Clear suggestions if switching to bot
+        if (receiver === 'bot') {
+            document.getElementById('suggestions').innerHTML =
+                '<span style="color:#bbb;font-size:12px">Bot will auto reply...</span>';
+        }
+
+        // Highlight active button
+        document.querySelectorAll('.mode-btn').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        event.target.classList.add('active');
+    }
+
     function sendMessage() {
         var sender = document.getElementById('sender').value || 'Anonymous';
+        var receiver = document.getElementById('receiver').value || 'bot';
         var content = document.getElementById('message').value;
         if (!content.trim()) return;
 
+        document.getElementById('receiver-tag').textContent =
+            receiver === 'bot' ? 'Receiver: 🤖 AI Bot' : 'Receiver: 👤 ' + receiver;
+
         stompClient.send('/app/chat', {}, JSON.stringify({
             sender: sender,
-            receiver: 'all',
+            receiver: receiver,
             content: content
         }));
         document.getElementById('message').value = '';

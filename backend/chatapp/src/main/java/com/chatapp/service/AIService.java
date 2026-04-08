@@ -3,46 +3,100 @@ package com.chatapp.service;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Arrays;
+import java.util.List;
 
 @Service
 public class AIService {
 
-    @Value("${huggingface.api.key:disabled}")
+    @Value("${groq.api.key:disabled}")
     private String apiKey;
 
-    private static final Map<String, List<String>> REPLIES = new HashMap<>();
-
-    static {
-        REPLIES.put("hi",          Arrays.asList("Hey! How's it going?", "Hello there!", "Hi! 👋"));
-        REPLIES.put("hello",       Arrays.asList("Hey!", "Hello! How are you?", "Hi there!"));
-        REPLIES.put("how are you", Arrays.asList("I'm good, thanks!", "Doing well! You?", "Great, how about you?"));
-        REPLIES.put("bye",         Arrays.asList("Goodbye! 👋", "See you later!", "Take care!"));
-        REPLIES.put("thanks",      Arrays.asList("You're welcome!", "No problem!", "Anytime! 😊"));
-        REPLIES.put("ok",          Arrays.asList("Sounds good!", "Got it!", "Alright!"));
-        REPLIES.put("yes",         Arrays.asList("Great!", "Awesome!", "Perfect!"));
-        REPLIES.put("no",          Arrays.asList("Okay, got it.", "No worries!", "Understood."));
-        REPLIES.put("help",        Arrays.asList("Sure, what do you need?", "I'm here to help!", "Tell me more!"));
-        REPLIES.put("good",        Arrays.asList("Glad to hear it! 😊", "That's great!", "Awesome!"));
-        REPLIES.put("bad",         Arrays.asList("Sorry to hear that.", "Hope it gets better!", "I'm here if you need to talk."));
-        REPLIES.put("lol",         Arrays.asList("😄", "Haha!", "That's funny!"));
-        REPLIES.put("sure",        Arrays.asList("Great!", "Let's do it!", "Sounds good!"));
-        REPLIES.put("what",        Arrays.asList("Can you elaborate?", "Tell me more!", "I'm listening."));
-        REPLIES.put("why",         Arrays.asList("Good question!", "Let me think...", "That's a deep one!"));
-    }
-
     public List<String> getSmartReplies(String message) {
-        String lower = message.toLowerCase().trim();
-        for (Map.Entry<String, List<String>> entry : REPLIES.entrySet()) {
-            if (lower.contains(entry.getKey())) {
-                return entry.getValue();
-            }
+        if (apiKey.equals("disabled") || apiKey.isBlank()) {
+            return Arrays.asList("Okay!");
         }
-        return Arrays.asList("Okay!", "Got it!", "Sounds good!");
+        try {
+            String reply = callGroq(message);
+            return Arrays.asList(reply);
+        } catch (Exception e) {
+            System.out.println("=== Groq error: " + e.getMessage());
+            return Arrays.asList("Okay!");
+        }
     }
 
     public String getSmartReply(String message) {
-        List<String> replies = getSmartReplies(message);
-        return replies.get(new Random().nextInt(replies.size()));
+        return getSmartReplies(message).get(0);
+    }
+
+    private String callGroq(String userMessage) throws Exception {
+        URL url = new URL("https://api.groq.com/openai/v1/chat/completions");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(8000);
+        conn.setReadTimeout(8000);
+
+        String safeMessage = userMessage
+                .replace("\\", "\\\\")
+                .replace("\"", "'")
+                .replace("\n", " ")
+                .replace("\r", " ");
+
+        String body = "{"
+            + "\"model\": \"llama-3.3-70b-versatile\","
+            + "\"messages\": ["
+            + "  {\"role\": \"system\", \"content\": \"You are a chat assistant. Reply with ONE short natural conversational response under 10 words. No explanations. Just the reply.\"},"
+            + "  {\"role\": \"user\", \"content\": \"" + safeMessage + "\"}"
+            + "],"
+            + "\"max_tokens\": 30,"
+            + "\"temperature\": 0.7"
+            + "}";
+
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(body.getBytes("UTF-8"));
+        }
+
+        int responseCode = conn.getResponseCode();
+
+        BufferedReader reader;
+        if (responseCode == 200) {
+            reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+        } else {
+            reader = new BufferedReader(new InputStreamReader(conn.getErrorStream()));
+        }
+
+        StringBuilder response = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            response.append(line);
+        }
+        reader.close();
+
+        System.out.println("=== Groq response code: " + responseCode);
+        System.out.println("=== Groq raw response: " + response.toString());
+
+        if (responseCode != 200) {
+            throw new Exception("Groq API error " + responseCode + ": " + response.toString());
+        }
+
+        // Parse content from JSON
+        String json = response.toString();
+        int start = json.indexOf("\"content\":\"") + 11;
+        int end = json.indexOf("\"", start);
+
+        if (start < 11 || end < 0) {
+            throw new Exception("Could not parse response: " + json);
+        }
+
+        return json.substring(start, end).trim();
     }
 }

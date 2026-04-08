@@ -25,16 +25,7 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/auth/login",
-                    "/auth/register",
-                    "/ws/**",
-                    "/test-chat.html",
-                    "/**/*.html",
-                    "/**/*.js",
-                    "/**/*.css"
-                ).permitAll()
-                .anyRequest().authenticated()
+                .anyRequest().permitAll()   // ← open everything for now
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
