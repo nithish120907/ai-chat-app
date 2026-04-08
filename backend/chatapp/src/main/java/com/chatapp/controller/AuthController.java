@@ -14,20 +14,24 @@ public class AuthController {
     private AuthService authService;
 
     @PostMapping("/register")
-    public Map<String, String> register(@RequestBody Map<String, String> request) {
+    public Map<String, String> register(@RequestBody Map<String, String> req) {
+
         String result = authService.register(
-            request.get("username"),
-            request.get("password")
+                req.get("username"),
+                req.get("password")
         );
+
         return Map.of("message", result);
     }
 
     @PostMapping("/login")
-    public Map<String, String> login(@RequestBody Map<String, String> request) {
+    public Map<String, String> login(@RequestBody Map<String, String> req) {
+
         String token = authService.login(
-            request.get("username"),
-            request.get("password")
+                req.get("username"),
+                req.get("password")
         );
+
         return Map.of("token", token);
     }
 }

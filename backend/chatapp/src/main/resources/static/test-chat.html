@@ -1,41 +1,97 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Chat Test</title>
+    <meta charset="UTF-8">
+    <title>Chat App Test</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .chat-box { background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 420px; overflow: hidden; }
+        .chat-header { background: #075e54; color: white; padding: 16px 20px; font-size: 16px; font-weight: bold; }
+        .messages { height: 320px; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+        .msg { max-width: 75%; padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.4; }
+        .msg.sent { background: #dcf8c6; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .msg.received { background: #ececec; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .msg .name { font-weight: bold; font-size: 12px; color: #075e54; margin-bottom: 2px; }
+        .suggestions { padding: 8px 12px; background: #f9f9f9; border-top: 1px solid #eee; display: flex; gap: 6px; flex-wrap: wrap; min-height: 40px; }
+        .suggestion-btn { background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 16px; padding: 4px 12px; font-size: 12px; cursor: pointer; color: #2e7d32; }
+        .suggestion-btn:hover { background: #c8e6c9; }
+        .input-row { display: flex; padding: 10px 12px; gap: 8px; border-top: 1px solid #eee; }
+        input { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 20px; outline: none; font-size: 14px; }
+        button.send-btn { background: #075e54; color: white; border: none; border-radius: 50%; width: 38px; height: 38px; font-size: 18px; cursor: pointer; }
+        #status { text-align: center; font-size: 12px; padding: 4px; color: #888; }
+    </style>
 </head>
 <body>
-    <h2>WebSocket Test</h2>
-    <input id="sender" placeholder="Your name" />
-    <input id="message" placeholder="Message" />
-    <button onclick="sendMessage()">Send</button>
-    <div id="messages"></div>
+<div class="chat-box">
+    <div class="chat-header">💬 AI Chat App</div>
+    <div id="messages" class="messages"></div>
+    <div id="suggestions" class="suggestions">
+        <span style="color:#bbb;font-size:12px">AI suggestions appear here...</span>
+    </div>
+    <div class="input-row">
+        <input id="sender" placeholder="Your name" style="max-width:90px" />
+        <input id="message" placeholder="Type a message..."
+               onkeydown="if(event.key==='Enter') sendMessage()" />
+        <button class="send-btn" onclick="sendMessage()">➤</button>
+    </div>
+    <div id="status">Connecting...</div>
+</div>
 
-    <script>
-        var socket = new SockJS('http://localhost:8080/ws');
-        var stompClient = Stomp.over(socket);
+<script>
+    var socket = new SockJS('http://localhost:8080/ws');
+    var stompClient = Stomp.over(socket);
+    stompClient.debug = null;
 
-        stompClient.connect({}, function(frame) {
-            console.log('Connected: ' + frame);
-            document.getElementById('messages').innerHTML += '<p>Connected!</p>';
+    stompClient.connect({}, function(frame) {
+        document.getElementById('status').textContent = '✅ Connected';
+        document.getElementById('status').style.color = 'green';
 
-            stompClient.subscribe('/topic/messages', function(msg) {
-                var body = JSON.parse(msg.body);
-                document.getElementById('messages').innerHTML +=
-                    '<p><b>' + body.sender + ':</b> ' + body.content + '</p>';
-            });
+        stompClient.subscribe('/topic/messages', function(msg) {
+            var body = JSON.parse(msg.body);
+            var messages = document.getElementById('messages');
+            var currentUser = document.getElementById('sender').value;
+
+            var div = document.createElement('div');
+            div.className = 'msg ' + (body.sender === currentUser ? 'sent' : 'received');
+            div.innerHTML = '<div class="name">' + body.sender + '</div>' + body.content;
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+
+            if (body.suggestions && body.suggestions.length > 0) {
+                var suggestionsDiv = document.getElementById('suggestions');
+                suggestionsDiv.innerHTML = '';
+                body.suggestions.forEach(function(s) {
+                    var btn = document.createElement('button');
+                    btn.className = 'suggestion-btn';
+                    btn.textContent = s;
+                    btn.onclick = function() {
+                        document.getElementById('message').value = s;
+                        sendMessage();
+                    };
+                    suggestionsDiv.appendChild(btn);
+                });
+            }
         });
+    }, function(error) {
+        document.getElementById('status').textContent = '❌ Connection failed';
+        document.getElementById('status').style.color = 'red';
+    });
 
-        function sendMessage() {
-            var sender = document.getElementById('sender').value;
-            var content = document.getElementById('message').value;
-            stompClient.send("/app/chat", {}, JSON.stringify({
-                sender: sender,
-                receiver: "all",
-                content: content
-            }));
-        }
-    </script>
+    function sendMessage() {
+        var sender = document.getElementById('sender').value || 'Anonymous';
+        var content = document.getElementById('message').value;
+        if (!content.trim()) return;
+
+        stompClient.send('/app/chat', {}, JSON.stringify({
+            sender: sender,
+            receiver: 'all',
+            content: content
+        }));
+        document.getElementById('message').value = '';
+    }
+</script>
 </body>
 </html>

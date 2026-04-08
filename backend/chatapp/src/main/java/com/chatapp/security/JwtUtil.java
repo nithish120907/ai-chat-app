@@ -34,7 +34,6 @@ public class JwtUtil {
             getClaims(token);
             return true;
         } catch (Exception e) {
-            System.out.println("=== Validation error: " + e.getMessage());
             return false;
         }
     }
