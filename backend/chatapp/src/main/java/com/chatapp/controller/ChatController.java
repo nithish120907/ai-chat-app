@@ -31,9 +31,13 @@ public class ChatController {
     @SendTo("/topic/messages")
     public Map<String, Object> sendMessage(Message message) {
 
-        // Save user message
-        message.setTimestamp(LocalDateTime.now());
-        messageRepository.save(message);
+        try {
+            // Save user message
+            message.setTimestamp(LocalDateTime.now());
+            messageRepository.save(message);
+        } catch (Exception e) {
+            System.out.println("❌ Error saving message: " + e.getMessage());
+        }
 
         boolean isBotChat = message.getReceiver() != null &&
                             message.getReceiver().equalsIgnoreCase("bot");
@@ -42,13 +46,11 @@ public class ChatController {
         userResponse.put("sender", message.getSender());
         userResponse.put("receiver", message.getReceiver());
         userResponse.put("content", message.getContent());
-        userResponse.put("timestamp", message.getTimestamp().toString());
+        userResponse.put("timestamp", LocalDateTime.now().toString());
+        userResponse.put("suggestions", Collections.emptyList());
 
         if (isBotChat) {
-            // Bot chat — no suggestions, AI will auto reply
-            userResponse.put("suggestions", Collections.emptyList());
-
-            // Send AI auto reply after 0.5s delay
+            // AI auto reply in background
             new Thread(() -> {
                 try {
                     Thread.sleep(500);
@@ -62,15 +64,29 @@ public class ChatController {
                     botResponse.put("suggestions", Collections.emptyList());
 
                     messagingTemplate.convertAndSend("/topic/messages", botResponse);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                } catch (Exception e) {
+                    System.out.println("❌ AI reply error: " + e.getMessage());
+
+                    // Send fallback message even if AI fails
+                    Map<String, Object> fallback = new HashMap<>();
+                    fallback.put("sender", "🤖 AI Bot");
+                    fallback.put("receiver", message.getSender());
+                    fallback.put("content", "Sorry, I am unavailable right now.");
+                    fallback.put("timestamp", LocalDateTime.now().toString());
+                    fallback.put("suggestions", Collections.emptyList());
+                    messagingTemplate.convertAndSend("/topic/messages", fallback);
                 }
             }).start();
 
         } else {
-            // Person-to-person chat — show AI suggestions
-            List<String> suggestions = aiService.getSmartReplies(message.getContent());
-            userResponse.put("suggestions", suggestions);
+            // Person-to-person — get AI suggestions safely
+            try {
+                List<String> suggestions = aiService.getSmartReplies(message.getContent());
+                userResponse.put("suggestions", suggestions);
+            } catch (Exception e) {
+                System.out.println("❌ Suggestions error: " + e.getMessage());
+                userResponse.put("suggestions", Collections.emptyList());
+            }
         }
 
         return userResponse;
