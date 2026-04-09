@@ -8,6 +8,7 @@ import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
+import java.security.Principal;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HashMap;
@@ -27,35 +28,37 @@ public class ChatController {
     private SimpMessagingTemplate messagingTemplate;
 
     @MessageMapping("/chat")
-    public void sendMessage(Message message) {
+    public void sendMessage(Message message, Principal principal) {
 
-        // Save user message
+        String sender = message.getSender().toLowerCase();
+        String receiver = message.getReceiver().toLowerCase();
+
+        System.out.println("📨 Principal: " + (principal != null ? principal.getName() : "NULL"));
+        System.out.println("📨 Sender: " + sender + " → Receiver: " + receiver);
+
         try {
+            message.setSender(sender);
+            message.setReceiver(receiver);
             message.setTimestamp(LocalDateTime.now());
             messageRepository.save(message);
         } catch (Exception e) {
-            System.out.println("❌ Error saving message: " + e.getMessage());
+            System.out.println("❌ Error saving: " + e.getMessage());
         }
 
-        boolean isBotChat = message.getReceiver() != null &&
-                            message.getReceiver().equalsIgnoreCase("bot");
+        boolean isBotChat = receiver.equalsIgnoreCase("bot");
 
         Map<String, Object> userResponse = new HashMap<>();
-        userResponse.put("sender", message.getSender());
-        userResponse.put("receiver", message.getReceiver());
+        userResponse.put("sender", sender);
+        userResponse.put("receiver", receiver);
         userResponse.put("content", message.getContent());
         userResponse.put("timestamp", LocalDateTime.now().toString());
         userResponse.put("suggestions", Collections.emptyList());
 
         if (isBotChat) {
-            // ✅ Send only to sender (private)
-            messagingTemplate.convertAndSendToUser(
-                message.getSender(),
-                "/queue/messages",
-                userResponse
-            );
+            // Send to sender via both private queue AND personal topic
+            messagingTemplate.convertAndSendToUser(sender, "/queue/messages", userResponse);
+            messagingTemplate.convertAndSend("/topic/chat." + sender, userResponse);
 
-            // AI auto reply
             new Thread(() -> {
                 try {
                     Thread.sleep(500);
@@ -63,56 +66,42 @@ public class ChatController {
 
                     Map<String, Object> botResponse = new HashMap<>();
                     botResponse.put("sender", "🤖 AI Bot");
-                    botResponse.put("receiver", message.getSender());
+                    botResponse.put("receiver", sender);
                     botResponse.put("content", aiReply);
                     botResponse.put("timestamp", LocalDateTime.now().toString());
                     botResponse.put("suggestions", Collections.emptyList());
 
-                    // ✅ Send AI reply only to sender (private)
-                    messagingTemplate.convertAndSendToUser(
-                        message.getSender(),
-                        "/queue/messages",
-                        botResponse
-                    );
+                    messagingTemplate.convertAndSendToUser(sender, "/queue/messages", botResponse);
+                    messagingTemplate.convertAndSend("/topic/chat." + sender, botResponse);
                 } catch (Exception e) {
-                    System.out.println("❌ AI reply error: " + e.getMessage());
-
+                    System.out.println("❌ AI error: " + e.getMessage());
                     Map<String, Object> fallback = new HashMap<>();
                     fallback.put("sender", "🤖 AI Bot");
-                    fallback.put("receiver", message.getSender());
+                    fallback.put("receiver", sender);
                     fallback.put("content", "Sorry, I am unavailable right now.");
                     fallback.put("timestamp", LocalDateTime.now().toString());
                     fallback.put("suggestions", Collections.emptyList());
-
-                    messagingTemplate.convertAndSendToUser(
-                        message.getSender(),
-                        "/queue/messages",
-                        fallback
-                    );
+                    messagingTemplate.convertAndSendToUser(sender, "/queue/messages", fallback);
+                    messagingTemplate.convertAndSend("/topic/chat." + sender, fallback);
                 }
             }).start();
 
         } else {
-            // Person-to-person — get AI suggestions
             try {
                 List<String> suggestions = aiService.getSmartReplies(message.getContent());
                 userResponse.put("suggestions", suggestions);
             } catch (Exception e) {
-                System.out.println("❌ Suggestions error: " + e.getMessage());
                 userResponse.put("suggestions", Collections.emptyList());
             }
 
-            // ✅ Send to BOTH sender and receiver only (private)
-            messagingTemplate.convertAndSendToUser(
-                message.getSender(),
-                "/queue/messages",
-                userResponse
-            );
-            messagingTemplate.convertAndSendToUser(
-                message.getReceiver(),
-                "/queue/messages",
-                userResponse
-            );
+            System.out.println("📤 Sending to: " + sender + " and " + receiver);
+
+            // ✅ Send via BOTH private queue AND personal topic (fallback)
+            messagingTemplate.convertAndSendToUser(sender, "/queue/messages", userResponse);
+            messagingTemplate.convertAndSend("/topic/chat." + sender, userResponse);
+
+            messagingTemplate.convertAndSendToUser(receiver, "/queue/messages", userResponse);
+            messagingTemplate.convertAndSend("/topic/chat." + receiver, userResponse);
         }
     }
 }

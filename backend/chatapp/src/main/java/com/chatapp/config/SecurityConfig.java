@@ -25,7 +25,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/ws/**").permitAll()
-                .requestMatchers("/messages/**").permitAll() // ✅ added this
+                .requestMatchers("/messages/**").permitAll()
+                .requestMatchers("/users/**").permitAll() // ✅ added
                 .anyRequest().authenticated())
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
