@@ -12,7 +12,7 @@ function ChatWindow({ currentUser, contact }) {
   const messagesEndRef = useRef(null);
   const connectedRef = useRef(false);
 
-  // ✅ Load chat history when contact changes
+  // Load chat history when contact changes
   useEffect(() => {
     setMessages([]);
     setSuggestions([]);
@@ -39,15 +39,21 @@ function ChatWindow({ currentUser, contact }) {
   }, [contact, currentUser]);
 
   useEffect(() => {
+    const token = localStorage.getItem('token');
+
     const client = new Client({
       webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
       reconnectDelay: 3000,
+      connectHeaders: {
+        Authorization: `Bearer ${token}`
+      },
       onConnect: () => {
         connectedRef.current = true;
         setConnected(true);
         console.log('✅ WebSocket connected');
 
-        client.subscribe('/topic/messages', (msg) => {
+        // ✅ Subscribe to private messages only for this user
+        client.subscribe('/user/queue/messages', (msg) => {
           console.log('📩 Received:', msg.body);
           const body = JSON.parse(msg.body);
           setMessages((prev) => [...prev, body]);
