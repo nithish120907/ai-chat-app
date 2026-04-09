@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Client } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import axios from 'axios';
 
 function ChatWindow({ currentUser, contact }) {
   const [messages, setMessages] = useState([]);
@@ -10,6 +11,32 @@ function ChatWindow({ currentUser, contact }) {
   const clientRef = useRef(null);
   const messagesEndRef = useRef(null);
   const connectedRef = useRef(false);
+
+  // ✅ Load chat history when contact changes
+  useEffect(() => {
+    setMessages([]);
+    setSuggestions([]);
+
+    const token = localStorage.getItem('token');
+
+    axios.get('http://localhost:8080/messages/history', {
+      params: {
+        user1: currentUser,
+        user2: contact.name
+      },
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    })
+    .then((res) => {
+      console.log('📜 History loaded:', res.data.length, 'messages');
+      setMessages(res.data);
+    })
+    .catch((err) => {
+      console.log('❌ History error:', err.message);
+    });
+
+  }, [contact, currentUser]);
 
   useEffect(() => {
     const client = new Client({
@@ -46,11 +73,6 @@ function ChatWindow({ currentUser, contact }) {
 
     return () => client.deactivate();
   }, []);
-
-  useEffect(() => {
-    setMessages([]);
-    setSuggestions([]);
-  }, [contact]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
