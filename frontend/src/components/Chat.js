@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Client } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
 import ChatWindow from './ChatWindow';
 import '../styles/Chat.css';
 
@@ -13,16 +15,66 @@ const CONTACTS = [
 function Chat() {
   const [selectedContact, setSelectedContact] = useState(CONTACTS[0]);
   const [username, setUsername] = useState('');
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [stompClient, setStompClient] = useState(null);
   const navigate = useNavigate();
+  const clientRef = useRef(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     const user = localStorage.getItem('username');
     if (!token) {
       navigate('/login');
-    } else {
-      setUsername(user);
+      return;
     }
+
+    // ✅ Normalize username to lowercase
+    const normalizedUser = user ? user.toLowerCase() : '';
+    setUsername(normalizedUser);
+
+    const client = new Client({
+      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
+      reconnectDelay: 3000,
+      connectHeaders: {
+        Authorization: `Bearer ${token}`
+      },
+      onConnect: () => {
+        console.log('✅ WebSocket connected as:', normalizedUser);
+
+        // Subscribe to online users
+        client.subscribe('/topic/online-users', (msg) => {
+          try {
+            const data = JSON.parse(msg.body);
+            // ✅ Normalize all online users to lowercase
+            const users = Array.isArray(data)
+              ? data.map(u => u.toLowerCase())
+              : Array.from(data).map(u => u.toLowerCase());
+            console.log('👥 Online users:', users);
+            setOnlineUsers(users);
+          } catch (e) {
+            console.log('❌ Error parsing online users:', e);
+          }
+        });
+
+        // ✅ Set client after fully connected
+        clientRef.current = client;
+        setStompClient(client);
+      },
+      onDisconnect: () => {
+        console.log('❌ WebSocket disconnected');
+        clientRef.current = null;
+        setStompClient(null);
+      },
+      onStompError: (frame) => {
+        console.error('❌ STOMP error:', frame);
+      }
+    });
+
+    client.activate();
+
+    return () => {
+      client.deactivate();
+    };
   }, [navigate]);
 
   const handleLogout = () => {
@@ -31,9 +83,14 @@ function Chat() {
     navigate('/login');
   };
 
+  const isOnline = (contactName) => {
+    if (contactName === 'bot') return true;
+    // ✅ Compare lowercase
+    return onlineUsers.includes(contactName.toLowerCase());
+  };
+
   return (
     <div className="chat-container">
-      {/* Sidebar */}
       <div className="sidebar">
         <div className="sidebar-header">
           <div className="user-info">
@@ -42,7 +99,7 @@ function Chat() {
           </div>
           <button className="logout-btn" onClick={handleLogout}>Logout</button>
         </div>
-        <div className="contacts-label">Chats</div>
+        <div className="contacts-label">CHATS</div>
         <div className="contacts-list">
           {CONTACTS.map((contact) => (
             <div
@@ -56,7 +113,11 @@ function Chat() {
               <div className="contact-info">
                 <div className="contact-name">{contact.label}</div>
                 <div className="contact-sub">
-                  {contact.type === 'bot' ? 'AI powered' : 'Online'}
+                  {isOnline(contact.name) ? (
+                    <span className="online-dot">🟢 Online</span>
+                  ) : (
+                    <span className="offline-dot">⚫ Offline</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -64,10 +125,10 @@ function Chat() {
         </div>
       </div>
 
-      {/* Chat Window */}
       <ChatWindow
         currentUser={username}
         contact={selectedContact}
+        stompClient={stompClient}
       />
     </div>
   );

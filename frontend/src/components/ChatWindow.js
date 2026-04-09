@@ -1,84 +1,104 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Client } from '@stomp/stompjs';
-import SockJS from 'sockjs-client';
 import axios from 'axios';
 
-function ChatWindow({ currentUser, contact }) {
+function ChatWindow({ currentUser, contact, stompClient }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [suggestions, setSuggestions] = useState([]);
-  const [connected, setConnected] = useState(false);
-  const clientRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const connectedRef = useRef(false);
+  const subscriptionsRef = useRef([]);
+  const currentContactRef = useRef(contact);
 
-  // Load chat history when contact changes
   useEffect(() => {
+    currentContactRef.current = contact;
+  }, [contact]);
+
+  // Load chat history
+  useEffect(() => {
+    if (!currentUser) return;
     setMessages([]);
     setSuggestions([]);
 
     const token = localStorage.getItem('token');
-
     axios.get('http://localhost:8080/messages/history', {
       params: {
-        user1: currentUser,
-        user2: contact.name
+        user1: currentUser.toLowerCase(),
+        user2: contact.name.toLowerCase()
       },
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+      headers: { Authorization: `Bearer ${token}` }
     })
     .then((res) => {
-      console.log('📜 History loaded:', res.data.length, 'messages');
+      console.log('📜 History:', res.data.length, 'messages');
       setMessages(res.data);
     })
-    .catch((err) => {
-      console.log('❌ History error:', err.message);
-    });
-
+    .catch((err) => console.log('❌ History error:', err.message));
   }, [contact, currentUser]);
 
+  // Subscribe to messages
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    if (!stompClient || !currentUser) return;
 
-    const client = new Client({
-      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
-      reconnectDelay: 3000,
-      connectHeaders: {
-        Authorization: `Bearer ${token}`
-      },
-      onConnect: () => {
-        connectedRef.current = true;
-        setConnected(true);
-        console.log('✅ WebSocket connected');
-
-        // ✅ Subscribe to private messages only for this user
-        client.subscribe('/user/queue/messages', (msg) => {
-          console.log('📩 Received:', msg.body);
-          const body = JSON.parse(msg.body);
-          setMessages((prev) => [...prev, body]);
-          if (body.suggestions && body.suggestions.length > 0) {
-            setSuggestions(body.suggestions);
-          } else {
-            setSuggestions([]);
-          }
-        });
-      },
-      onDisconnect: () => {
-        connectedRef.current = false;
-        setConnected(false);
-        console.log('❌ WebSocket disconnected');
-      },
-      onStompError: (frame) => {
-        console.error('❌ STOMP error:', frame);
-      }
+    // Clear old subscriptions
+    subscriptionsRef.current.forEach(sub => {
+      try { sub.unsubscribe(); } catch (e) {}
     });
+    subscriptionsRef.current = [];
 
-    client.activate();
-    clientRef.current = client;
+    const handleMessage = (msg) => {
+      console.log('📩 Received:', msg.body);
+      const body = JSON.parse(msg.body);
 
-    return () => client.deactivate();
-  }, []);
+      const activeContact = currentContactRef.current;
+      const senderLower = (body.sender || '').toLowerCase();
+      const receiverLower = (body.receiver || '').toLowerCase();
+      const currentUserLower = currentUser.toLowerCase();
+      const contactNameLower = activeContact.name.toLowerCase();
+
+      const isRelevant =
+        (senderLower === contactNameLower && receiverLower === currentUserLower) ||
+        (senderLower === currentUserLower && receiverLower === contactNameLower) ||
+        (senderLower === '🤖 ai bot' && contactNameLower === 'bot') ||
+        (receiverLower === 'bot' && contactNameLower === 'bot');
+
+      console.log('🔍 Relevant:', isRelevant, 'sender:', senderLower, 'receiver:', receiverLower);
+
+      if (isRelevant) {
+        // ✅ Prevent duplicates
+        setMessages((prev) => {
+          const isDuplicate = prev.some(
+            m => m.sender === body.sender &&
+                 m.content === body.content &&
+                 m.timestamp === body.timestamp
+          );
+          if (isDuplicate) return prev;
+          return [...prev, body];
+        });
+      }
+
+      if (body.suggestions && body.suggestions.length > 0) {
+        setSuggestions(body.suggestions);
+      } else {
+        setSuggestions([]);
+      }
+    };
+
+    // ✅ Subscribe to private queue
+    const sub1 = stompClient.subscribe('/user/queue/messages', handleMessage);
+    subscriptionsRef.current.push(sub1);
+    console.log('📡 Subscribed to /user/queue/messages');
+
+    // ✅ Subscribe to personal topic as fallback
+    const personalTopic = `/topic/chat.${currentUser.toLowerCase()}`;
+    const sub2 = stompClient.subscribe(personalTopic, handleMessage);
+    subscriptionsRef.current.push(sub2);
+    console.log('📡 Subscribed to', personalTopic);
+
+    return () => {
+      subscriptionsRef.current.forEach(sub => {
+        try { sub.unsubscribe(); } catch (e) {}
+      });
+    };
+  }, [stompClient, currentUser]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -86,21 +106,21 @@ function ChatWindow({ currentUser, contact }) {
 
   const sendMessage = (content) => {
     if (!content.trim()) return;
-    if (!clientRef.current || !connectedRef.current) {
+    if (!stompClient) {
       console.log('❌ Not connected!');
       return;
     }
 
-    clientRef.current.publish({
+    stompClient.publish({
       destination: '/app/chat',
       body: JSON.stringify({
-        sender: currentUser,
-        receiver: contact.name,
+        sender: currentUser.toLowerCase(),
+        receiver: contact.name.toLowerCase(),
         content: content,
       }),
     });
 
-    console.log('📤 Sent to /app/chat');
+    console.log('📤 Sent:', currentUser, '→', contact.name);
     setInput('');
     setSuggestions([]);
   };
@@ -113,7 +133,7 @@ function ChatWindow({ currentUser, contact }) {
           <div>
             <div className="chat-name">{contact.label}</div>
             <div className="chat-status">
-              {connected ? '🟢 Online' : '🔴 Connecting...'}
+              {stompClient ? '🟢 Online' : '🔴 Connecting...'}
             </div>
           </div>
         </div>
@@ -129,7 +149,7 @@ function ChatWindow({ currentUser, contact }) {
           <div
             key={index}
             className={`message ${
-              msg.sender === currentUser
+              (msg.sender || '').toLowerCase() === currentUser.toLowerCase()
                 ? 'sent'
                 : msg.sender === '🤖 AI Bot'
                 ? 'bot'
@@ -177,7 +197,7 @@ function ChatWindow({ currentUser, contact }) {
         <button
           className="send-btn"
           onClick={() => sendMessage(input)}
-          disabled={!connected}
+          disabled={!stompClient}
         >
           ➤
         </button>
