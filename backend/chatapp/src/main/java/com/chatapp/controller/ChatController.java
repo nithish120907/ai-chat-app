@@ -5,7 +5,6 @@ import com.chatapp.repository.MessageRepository;
 import com.chatapp.service.AIService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
@@ -28,11 +27,10 @@ public class ChatController {
     private SimpMessagingTemplate messagingTemplate;
 
     @MessageMapping("/chat")
-    @SendTo("/topic/messages")
-    public Map<String, Object> sendMessage(Message message) {
+    public void sendMessage(Message message) {
 
+        // Save user message
         try {
-            // Save user message
             message.setTimestamp(LocalDateTime.now());
             messageRepository.save(message);
         } catch (Exception e) {
@@ -50,7 +48,14 @@ public class ChatController {
         userResponse.put("suggestions", Collections.emptyList());
 
         if (isBotChat) {
-            // AI auto reply in background
+            // ✅ Send only to sender (private)
+            messagingTemplate.convertAndSendToUser(
+                message.getSender(),
+                "/queue/messages",
+                userResponse
+            );
+
+            // AI auto reply
             new Thread(() -> {
                 try {
                     Thread.sleep(500);
@@ -63,23 +68,32 @@ public class ChatController {
                     botResponse.put("timestamp", LocalDateTime.now().toString());
                     botResponse.put("suggestions", Collections.emptyList());
 
-                    messagingTemplate.convertAndSend("/topic/messages", botResponse);
+                    // ✅ Send AI reply only to sender (private)
+                    messagingTemplate.convertAndSendToUser(
+                        message.getSender(),
+                        "/queue/messages",
+                        botResponse
+                    );
                 } catch (Exception e) {
                     System.out.println("❌ AI reply error: " + e.getMessage());
 
-                    // Send fallback message even if AI fails
                     Map<String, Object> fallback = new HashMap<>();
                     fallback.put("sender", "🤖 AI Bot");
                     fallback.put("receiver", message.getSender());
                     fallback.put("content", "Sorry, I am unavailable right now.");
                     fallback.put("timestamp", LocalDateTime.now().toString());
                     fallback.put("suggestions", Collections.emptyList());
-                    messagingTemplate.convertAndSend("/topic/messages", fallback);
+
+                    messagingTemplate.convertAndSendToUser(
+                        message.getSender(),
+                        "/queue/messages",
+                        fallback
+                    );
                 }
             }).start();
 
         } else {
-            // Person-to-person — get AI suggestions safely
+            // Person-to-person — get AI suggestions
             try {
                 List<String> suggestions = aiService.getSmartReplies(message.getContent());
                 userResponse.put("suggestions", suggestions);
@@ -87,8 +101,18 @@ public class ChatController {
                 System.out.println("❌ Suggestions error: " + e.getMessage());
                 userResponse.put("suggestions", Collections.emptyList());
             }
-        }
 
-        return userResponse;
+            // ✅ Send to BOTH sender and receiver only (private)
+            messagingTemplate.convertAndSendToUser(
+                message.getSender(),
+                "/queue/messages",
+                userResponse
+            );
+            messagingTemplate.convertAndSendToUser(
+                message.getReceiver(),
+                "/queue/messages",
+                userResponse
+            );
+        }
     }
 }
